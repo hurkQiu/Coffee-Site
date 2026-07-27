@@ -2,6 +2,7 @@
 import { RouterView, useRouter } from 'vue-router';
 import Home from './components/Home.vue';
 import TopBanner from './components/TopBanner.vue';
+import ToastContainer from './components/ToastContainer.vue';
 </script>
 
 <template>
@@ -12,6 +13,7 @@ import TopBanner from './components/TopBanner.vue';
     <div class="container">
       <RouterView/>
     </div>
+    <ToastContainer />
   </main>
 </template>
 

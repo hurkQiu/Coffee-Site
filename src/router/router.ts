@@ -11,6 +11,9 @@ import Member from '@/components/Member.vue'
 import ForgotPassword from '@/components/ForgotPassword.vue'
 import VerifyCode from '@/components/VerifyCode.vue'
 import OrderHistory from '@/components/OrderHistory.vue'
+import ProductDetail from '@/components/ProductDetail.vue'
+import Wishlist from '@/components/Wishlist.vue'
+import NotFound from '@/components/NotFound.vue'
 
 
 const router = createRouter({
@@ -78,6 +81,24 @@ const router = createRouter({
       path: '/orderHistory',
       name: RouteName.ORDER_HISTORY,
       component: OrderHistory
+    }
+    ,
+    {
+      path: '/product/:type/:id',
+      name: RouteName.PRODUCT_DETAIL,
+      component: ProductDetail
+    }
+    ,
+    {
+      path: '/wishlist',
+      name: RouteName.WISHLIST,
+      component: Wishlist
+    }
+    ,
+    {
+      path: '/:pathMatch(.*)*',
+      name: RouteName.NOT_FOUND,
+      component: NotFound
     }
   ]
 })

@@ -26,7 +26,7 @@ function switchTab(tab: Tab) {
 }
 
 function handleLogin() {
-  login()
+  login(loginEmail.value)
   loginMessage.value = `已登入：${loginEmail.value}`
   router.push({ name: RouteName.HOME })
 }
@@ -68,6 +68,7 @@ function handleRegister() {
       >忘記密碼？</RouterLink>
       <button type="submit" class="submit-btn">登入</button>
       <p v-if="loginMessage" class="feedback">{{ loginMessage }}</p>
+      <p class="hint">測試提示：帳號中包含「admin」即可取得管理員權限</p>
     </form>
 
     <form v-else class="auth-form" @submit.prevent="handleRegister">
@@ -163,5 +164,12 @@ function handleRegister() {
   text-align: center;
   color: var(--color-brand);
   font-size: 0.9rem;
+}
+
+.hint {
+  text-align: center;
+  color: var(--color-text);
+  opacity: 0.6;
+  font-size: 0.8rem;
 }
 </style>

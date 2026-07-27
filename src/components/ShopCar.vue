@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useCart } from '@/stores/cart'
+import { useToast } from '@/stores/toast'
+import { simulateDelay } from '@/utils/async'
+import { RouteName } from '@/router/routeName'
 import IconCart from './icons/IconCart.vue'
 import IconImagePlaceholder from './icons/IconImagePlaceholder.vue'
 
-const { items, updateQuantity, removeItem, totalPrice } = useCart()
+const { items, updateQuantity, removeItem, clearCart, totalPrice } = useCart()
+const { showToast } = useToast()
 
 const COUPONS: Record<string, number> = {
   COFFEE10: 0.1,
@@ -14,6 +18,9 @@ const COUPONS: Record<string, number> = {
 const couponInput = ref('')
 const appliedCoupon = ref<{ code: string; rate: number } | null>(null)
 const couponError = ref('')
+const isApplyingCoupon = ref(false)
+const isCheckingOut = ref(false)
+const orderPlaced = ref(false)
 
 const subtotal = computed(() => totalPrice.value)
 const shippingFee = computed(() => (subtotal.value >= 1000 || subtotal.value === 0 ? 0 : 60))
@@ -22,16 +29,23 @@ const discount = computed(() =>
 )
 const total = computed(() => subtotal.value + shippingFee.value - discount.value)
 
-function applyCoupon() {
+async function applyCoupon() {
+  if (isApplyingCoupon.value) return
+  isApplyingCoupon.value = true
+  await simulateDelay(400)
+
   const code = couponInput.value.trim().toUpperCase()
   const rate = COUPONS[code]
   if (!rate) {
     couponError.value = '優惠券代碼無效'
     appliedCoupon.value = null
-    return
+    showToast('優惠券代碼無效', 'error')
+  } else {
+    appliedCoupon.value = { code, rate }
+    couponError.value = ''
+    showToast(`已套用優惠券「${code}」`, 'success')
   }
-  appliedCoupon.value = { code, rate }
-  couponError.value = ''
+  isApplyingCoupon.value = false
 }
 
 function removeCoupon() {
@@ -40,14 +54,27 @@ function removeCoupon() {
   couponError.value = ''
 }
 
-function checkout() {
+async function checkout() {
+  if (isCheckingOut.value) return
+  isCheckingOut.value = true
+  await simulateDelay(800)
   console.log('前往結帳', { items: [...items], total: total.value })
+  isCheckingOut.value = false
+  orderPlaced.value = true
+  clearCart()
+  showToast('訂單已送出（僅為示範，未串接實際金流）', 'success')
 }
 </script>
 
 <template>
   <div class="shop-car">
-    <div v-if="items.length === 0" class="empty-cart">
+    <div v-if="orderPlaced" class="order-success">
+      <p class="order-success__emoji">🎉</p>
+      <p class="order-success__text">訂單已送出！感謝您的購買。</p>
+      <RouterLink :to="{ name: RouteName.COFFEE_BEANS }" class="order-success__link">繼續選購</RouterLink>
+    </div>
+
+    <div v-else-if="items.length === 0" class="empty-cart">
       <IconCart class="empty-cart__icon" />
       <p class="empty-cart__text">購物車是空的</p>
     </div>
@@ -61,9 +88,9 @@ function checkout() {
           </div>
           <span class="cart-row__name">{{ item.name }}</span>
           <div class="cart-row__quantity">
-            <button type="button" @click="updateQuantity(item.id, item.quantity - 1)">-</button>
+            <button type="button" aria-label="減少數量" @click="updateQuantity(item.id, item.quantity - 1)">-</button>
             <span>{{ item.quantity }}</span>
-            <button type="button" @click="updateQuantity(item.id, item.quantity + 1)">+</button>
+            <button type="button" aria-label="增加數量" @click="updateQuantity(item.id, item.quantity + 1)">+</button>
           </div>
           <span class="cart-row__price">NT$ {{ item.price * item.quantity }}</span>
           <button type="button" class="cart-row__remove" aria-label="移除" @click="removeItem(item.id)">×</button>
@@ -90,9 +117,12 @@ function checkout() {
               v-model="couponInput"
               type="text"
               placeholder="輸入優惠券代碼"
+              :disabled="isApplyingCoupon"
               @keyup.enter="applyCoupon"
             />
-            <button type="button" @click="applyCoupon">套用</button>
+            <button type="button" :disabled="isApplyingCoupon" @click="applyCoupon">
+              {{ isApplyingCoupon ? '套用中...' : '套用' }}
+            </button>
           </div>
           <p v-if="couponError" class="summary__coupon-error">{{ couponError }}</p>
         </div>
@@ -107,7 +137,9 @@ function checkout() {
           <span>NT$ {{ total }}</span>
         </div>
 
-        <button type="button" class="summary__checkout" @click="checkout">前往結帳</button>
+        <button type="button" class="summary__checkout" :disabled="isCheckingOut" @click="checkout">
+          {{ isCheckingOut ? '處理中...' : '前往結帳' }}
+        </button>
       </div>
     </div>
   </div>
@@ -136,6 +168,38 @@ function checkout() {
 
 .empty-cart__text {
   font-size: 1.1rem;
+}
+
+.order-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 0;
+  color: var(--color-text);
+  text-align: center;
+}
+
+.order-success__emoji {
+  font-size: 3rem;
+}
+
+.order-success__text {
+  font-size: 1.1rem;
+}
+
+.order-success__link {
+  margin-top: 8px;
+  padding: 10px 24px;
+  border-radius: 999px;
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+  text-decoration: none;
+}
+
+.order-success__link:hover {
+  background: var(--color-brand-dark);
 }
 
 .cart-content {
@@ -304,8 +368,15 @@ function checkout() {
   cursor: pointer;
 }
 
-.summary__checkout:hover {
+.summary__checkout:hover:not(:disabled) {
   background: hsla(160, 100%, 32%, 1);
+}
+
+.summary__checkout:disabled,
+.summary__coupon-form button:disabled,
+.summary__coupon-form input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 @media (max-width: 600px) {

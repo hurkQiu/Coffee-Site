@@ -2,12 +2,17 @@
 import { ref } from 'vue';
 import { RouteName } from '@/router/routeName';
 import { useAuth } from '@/stores/auth';
+import { useCart } from '@/stores/cart';
+import { useWishlist } from '@/stores/wishlist';
 import IconCart from './icons/IconCart.vue';
 import IconMember from './icons/IconMember.vue';
 import IconOrderHistory from './icons/IconOrderHistory.vue';
+import IconHeart from './icons/IconHeart.vue';
 import coffeeLogo from '@/assets/images/coffee_logo.png';
 
-const { isLoggedIn, logout } = useAuth()
+const { isLoggedIn, logout, testMode, toggleTestMode } = useAuth()
+const { totalCount } = useCart()
+const { wishlistIds } = useWishlist()
 
 const roastLevels = ['淺焙', '中焙', '深焙']
 const utensilCategories = ['濾杯', '磨豆機', '耗材', '其餘用具']
@@ -44,10 +49,13 @@ function handleLogout() {
                 class="nav-item"
                 @mouseenter="openDropdown('beans')"
                 @mouseleave="closeDropdown()"
+                @keydown.esc="closeDropdown()"
             >
                 <RouterLink
                     :to="{ name: RouteName.COFFEE_BEANS }"
                     class="nav-link"
+                    aria-haspopup="true"
+                    :aria-expanded="activeDropdown === 'beans'"
                     @click="toggleDropdown('beans')"
                 >Coffee Beans</RouterLink>
                 <transition name="dropdown-fade">
@@ -66,10 +74,13 @@ function handleLogout() {
                 class="nav-item"
                 @mouseenter="openDropdown('utensil')"
                 @mouseleave="closeDropdown()"
+                @keydown.esc="closeDropdown()"
             >
                 <RouterLink
                     :to="{ name: RouteName.COFFEE_UTENSIL }"
                     class="nav-link"
+                    aria-haspopup="true"
+                    :aria-expanded="activeDropdown === 'utensil'"
                     @click="toggleDropdown('utensil')"
                 >Coffee Utensil</RouterLink>
                 <transition name="dropdown-fade">
@@ -98,15 +109,26 @@ function handleLogout() {
             <IconOrderHistory />
         </RouterLink>
 
+        <button
+            type="button"
+            class="test-mode-button"
+            :class="{ 'test-mode-button--active': testMode }"
+            :aria-pressed="testMode"
+            @click="toggleTestMode"
+        >測試模式</button>
+
         <div
             class="nav-item member-item"
             @mouseenter="openDropdown('member')"
             @mouseleave="closeDropdown()"
+            @keydown.esc="closeDropdown()"
         >
             <button
                 type="button"
                 class="member-button"
                 aria-label="會員"
+                aria-haspopup="true"
+                :aria-expanded="activeDropdown === 'member'"
                 @click="toggleDropdown('member')"
             >
                 <IconMember />
@@ -130,8 +152,14 @@ function handleLogout() {
             </transition>
         </div>
 
+        <RouterLink :to="{ name: RouteName.WISHLIST }" class="wishlist-button" aria-label="我的收藏">
+            <IconHeart />
+            <span v-if="wishlistIds.size > 0" class="badge">{{ wishlistIds.size }}</span>
+        </RouterLink>
+
         <RouterLink :to="{ name: RouteName.SHOP_CAR }" class="cart-button" aria-label="購物車">
             <IconCart />
+            <span v-if="totalCount > 0" class="badge">{{ totalCount }}</span>
         </RouterLink>
     </div>
 </template>
@@ -260,9 +288,35 @@ nav {
     transform: translateY(-4px);
 }
 
+.test-mode-button {
+    flex: 0 0 auto;
+    padding: 6px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 999px;
+    background: none;
+    color: var(--color-on-brand);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.test-mode-button:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.test-mode-button--active {
+    background: #f5a623;
+    border-color: #f5a623;
+    color: #3a2a00;
+    font-weight: bold;
+}
+
 .order-history-button,
 .member-button,
+.wishlist-button,
 .cart-button {
+    position: relative;
     flex: 0 0 40px;
     width: 40px;
     height: 40px;
@@ -279,6 +333,7 @@ nav {
 
 .order-history-button svg,
 .member-button svg,
+.wishlist-button svg,
 .cart-button svg {
     width: 22px;
     height: 22px;
@@ -286,7 +341,26 @@ nav {
 
 .order-history-button:hover,
 .member-button:hover,
+.wishlist-button:hover,
 .cart-button:hover {
     background-color: rgba(255, 255, 255, 0.15);
+}
+
+.badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #f5a623;
+    color: #3a2a00;
+    font-size: 0.7rem;
+    font-weight: bold;
+    line-height: 1;
 }
 </style>

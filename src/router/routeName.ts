@@ -9,5 +9,8 @@ export const RouteName = {
   MEMBER: 'member',
   FORGOT_PASSWORD: 'forgotPassword',
   VERIFY_CODE: 'verifyCode',
-  ORDER_HISTORY: 'orderHistory'
+  ORDER_HISTORY: 'orderHistory',
+  PRODUCT_DETAIL: 'productDetail',
+  WISHLIST: 'wishlist',
+  NOT_FOUND: 'notFound'
 }

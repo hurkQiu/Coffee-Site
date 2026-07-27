@@ -2,39 +2,37 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ShopItem from './ShopItem.vue'
+import ProductFormModal from './ProductFormModal.vue'
+import CategoryManagerModal from './CategoryManagerModal.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import { useCart } from '@/stores/cart'
+import { useAuth } from '@/stores/auth'
+import { useUtensils, type CoffeeUtensilItem } from '@/stores/utensils'
+import { useToast } from '@/stores/toast'
+import { simulateDelay } from '@/utils/async'
 
 const { addItem } = useCart()
+const { canManage, testMode, verifyAdminPermission } = useAuth()
+const { showToast } = useToast()
 const route = useRoute()
 
-type UtensilCategory = '濾杯' | '磨豆機' | '耗材' | '其餘用具'
+const {
+  utensils,
+  categories,
+  visibleCategories,
+  addUtensil,
+  updateUtensil,
+  removeUtensil,
+  addCategory,
+  toggleCategoryHidden,
+  hiddenCategories,
+} = useUtensils()
 
-interface CoffeeUtensilItem {
-  id: number
-  name: string
-  price: number
-  image: string
-  category: UtensilCategory
+function isUtensilCategory(value: unknown): value is string {
+  return typeof value === 'string' && visibleCategories.value.includes(value)
 }
 
-const categories: UtensilCategory[] = ['濾杯', '磨豆機', '耗材', '其餘用具']
-
-const utensils: CoffeeUtensilItem[] = [
-  { id: 1, name: 'V60 濾杯', price: 450, image: "", category: '濾杯' },
-  { id: 2, name: '蛋糕型濾杯', price: 380, image: "", category: '濾杯' },
-  { id: 3, name: '手搖磨豆機', price: 1200, image: "", category: '磨豆機' },
-  { id: 4, name: '電動磨豆機', price: 3200, image: "", category: '磨豆機' },
-  { id: 5, name: '濾紙 100 入', price: 150, image: "", category: '耗材' },
-  { id: 6, name: '濾布', price: 220, image: "", category: '耗材' },
-  { id: 7, name: '手沖壺', price: 890, image: "", category: '其餘用具' },
-  { id: 8, name: '電子秤', price: 650, image: "", category: '其餘用具' },
-]
-
-function isUtensilCategory(value: unknown): value is UtensilCategory {
-  return typeof value === 'string' && (categories as string[]).includes(value)
-}
-
-const selectedCategory = ref<UtensilCategory | null>(
+const selectedCategory = ref<string | null>(
   isUtensilCategory(route.query.category) ? route.query.category : null,
 )
 
@@ -45,16 +43,30 @@ watch(
   },
 )
 
-function toggleCategory(category: UtensilCategory) {
+function toggleCategory(category: string) {
   selectedCategory.value = selectedCategory.value === category ? null : category
 }
 
-const filteredUtensils = computed(() =>
-  utensils.filter((item) => !selectedCategory.value || item.category === selectedCategory.value),
-)
+const searchQuery = ref('')
+type SortOption = 'default' | 'price-asc' | 'price-desc' | 'name'
+const sortOption = ref<SortOption>('default')
+
+const filteredUtensils = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  const list = utensils.value.filter(
+    (item) =>
+      (!selectedCategory.value || item.category === selectedCategory.value) &&
+      (!keyword || item.name.toLowerCase().includes(keyword)),
+  )
+  const sorted = [...list]
+  if (sortOption.value === 'price-asc') sorted.sort((a, b) => a.price - b.price)
+  else if (sortOption.value === 'price-desc') sorted.sort((a, b) => b.price - a.price)
+  else if (sortOption.value === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+  return sorted
+})
 
 function handleAddToCart(payload: { id: string; quantity: number }) {
-  const utensil = utensils.find((u) => `utensil-${u.id}` === payload.id)
+  const utensil = utensils.value.find((u) => `utensil-${u.id}` === payload.id)
   if (!utensil) return
   addItem({
     id: payload.id,
@@ -63,44 +75,275 @@ function handleAddToCart(payload: { id: string; quantity: number }) {
     image: utensil.image,
     quantity: payload.quantity,
   })
+  showToast(`已加入購物車：${utensil.name}`, 'success')
+}
+
+// 管理員編輯模式
+const editMode = ref(false)
+const formMode = ref<'add' | 'edit' | null>(null)
+const editingUtensil = ref<CoffeeUtensilItem | null>(null)
+
+function openAddForm() {
+  editingUtensil.value = null
+  formMode.value = 'add'
+}
+
+function openEditForm(utensil: CoffeeUtensilItem) {
+  editingUtensil.value = utensil
+  formMode.value = 'edit'
+}
+
+function closeForm() {
+  formMode.value = null
+  editingUtensil.value = null
+}
+
+const utensilFormSelectFields = computed(() => [
+  {
+    key: 'category',
+    label: '類別',
+    options: visibleCategories.value,
+    initialValue: editingUtensil.value?.category ?? visibleCategories.value[0] ?? '',
+  },
+])
+
+function handleFormSubmit(payload: {
+  name: string
+  image: string
+  price: number
+  stock: number
+  selections: Record<string, string>
+}) {
+  if (testMode.value) {
+    console.log('[測試模式] 略過實際新增／編輯商品動作')
+    showToast('測試模式：已略過實際新增／編輯動作', 'info')
+    closeForm()
+    return
+  }
+  if (!verifyAdminPermission()) {
+    editMode.value = false
+    closeForm()
+    return
+  }
+
+  const category = payload.selections.category ?? visibleCategories.value[0] ?? ''
+  const wasAdd = formMode.value === 'add'
+
+  if (wasAdd) {
+    addUtensil({ name: payload.name, image: payload.image, price: payload.price, stock: payload.stock, category })
+  } else if (formMode.value === 'edit' && editingUtensil.value) {
+    updateUtensil(editingUtensil.value.id, {
+      name: payload.name,
+      image: payload.image,
+      price: payload.price,
+      stock: payload.stock,
+      category,
+    })
+  }
+
+  showToast(wasAdd ? `已新增商品：${payload.name}` : `已更新商品：${payload.name}`, 'success')
+  closeForm()
+}
+
+const pendingDeleteUtensil = ref<CoffeeUtensilItem | null>(null)
+
+function requestDelete(utensil: CoffeeUtensilItem) {
+  pendingDeleteUtensil.value = utensil
+}
+
+function cancelDelete() {
+  pendingDeleteUtensil.value = null
+}
+
+async function confirmDelete() {
+  const utensil = pendingDeleteUtensil.value
+  pendingDeleteUtensil.value = null
+  if (!utensil) return
+
+  if (testMode.value) {
+    console.log('[測試模式] 略過實際刪除商品動作')
+    showToast('測試模式：已略過實際刪除動作', 'info')
+    return
+  }
+  if (!verifyAdminPermission()) {
+    editMode.value = false
+    return
+  }
+
+  await simulateDelay(400)
+  removeUtensil(utensil.id)
+  showToast(`已刪除商品：${utensil.name}`, 'success')
+}
+
+// 類別管理
+const categoryManagerOpen = ref(false)
+
+const categoryGroups = computed(() => [
+  {
+    key: 'category',
+    title: '類別',
+    items: categories.value.map((value) => ({ value, hidden: hiddenCategories.value.has(value) })),
+  },
+])
+
+function handleCategoryAdd(payload: { groupKey: string; value: string }) {
+  if (!testMode.value && !verifyAdminPermission()) {
+    editMode.value = false
+    categoryManagerOpen.value = false
+    return
+  }
+  addCategory(payload.value)
+  showToast(`已新增類別：${payload.value}`, 'success')
+}
+
+function handleCategoryToggleHidden(payload: { groupKey: string; value: string }) {
+  if (!testMode.value && !verifyAdminPermission()) {
+    editMode.value = false
+    categoryManagerOpen.value = false
+    return
+  }
+
+  const isCurrentlyHidden = hiddenCategories.value.has(payload.value)
+  if (!isCurrentlyHidden && visibleCategories.value.length <= 1) {
+    showToast('至少須保留一個顯示項目', 'error')
+    return
+  }
+
+  toggleCategoryHidden(payload.value)
+
+  if (!isCurrentlyHidden && selectedCategory.value === payload.value) {
+    selectedCategory.value = null
+  }
+
+  showToast(isCurrentlyHidden ? `已顯示類別：${payload.value}` : `已隱藏類別：${payload.value}`, 'success')
 }
 </script>
 
 <template>
-  <div class="coffee-utensil">
-    <aside class="filter">
-      <div class="filter__group">
-        <h3 class="filter__title">類別</h3>
-        <ul class="filter__list">
-          <li v-for="category in categories" :key="category">
-            <button
-              type="button"
-              class="filter__item"
-              :class="{ 'filter__item--active': selectedCategory === category }"
-              @click="toggleCategory(category)"
-            >
-              {{ category }}
-            </button>
-          </li>
-        </ul>
-      </div>
-    </aside>
+  <div class="coffee-utensil-page">
+    <div v-if="canManage" class="admin-toolbar">
+      <button type="button" class="admin-toolbar__toggle" @click="editMode = !editMode">
+        {{ editMode ? '結束編輯' : '編輯模式' }}
+      </button>
+      <button v-if="editMode" type="button" class="admin-toolbar__add" @click="openAddForm">+ 新增商品</button>
+      <button type="button" class="admin-toolbar__category" @click="categoryManagerOpen = true">類別管理</button>
+    </div>
 
-    <section class="products">
-      <ShopItem
-        v-for="utensil in filteredUtensils"
-        :key="utensil.id"
-        :id="`utensil-${utensil.id}`"
-        :name="utensil.name"
-        :price="utensil.price"
-        :image="utensil.image"
-        @add-to-cart="handleAddToCart"
-      />
-    </section>
+    <div class="coffee-utensil">
+      <aside class="filter">
+        <div class="filter__group">
+          <h3 class="filter__title">類別</h3>
+          <ul class="filter__list">
+            <li v-for="category in visibleCategories" :key="category">
+              <button
+                type="button"
+                class="filter__item"
+                :class="{ 'filter__item--active': selectedCategory === category }"
+                @click="toggleCategory(category)"
+              >
+                {{ category }}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </aside>
+
+      <section class="products">
+        <div class="products__toolbar">
+          <input
+            v-model="searchQuery"
+            type="search"
+            class="products__search"
+            placeholder="搜尋器具名稱..."
+            aria-label="搜尋器具名稱"
+          />
+          <select v-model="sortOption" class="products__sort" aria-label="排序方式">
+            <option value="default">預設排序</option>
+            <option value="price-asc">價格由低到高</option>
+            <option value="price-desc">價格由高到低</option>
+            <option value="name">名稱排序</option>
+          </select>
+        </div>
+
+        <p v-if="filteredUtensils.length === 0" class="products__empty">找不到符合條件的商品</p>
+
+        <div v-else class="products__grid">
+          <div v-for="utensil in filteredUtensils" :key="utensil.id" class="product-cell">
+            <ShopItem
+              :id="`utensil-${utensil.id}`"
+              :name="utensil.name"
+              :price="utensil.price"
+              :image="utensil.image"
+              :stock="utensil.stock"
+              @add-to-cart="handleAddToCart"
+            />
+            <div v-if="editMode" class="product-cell__admin-actions">
+              <button type="button" aria-label="編輯商品" @click="openEditForm(utensil)">✎</button>
+              <button type="button" aria-label="刪除商品" @click="requestDelete(utensil)">🗑</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <ProductFormModal
+      v-if="formMode"
+      :title="formMode === 'add' ? '新增器具' : '編輯器具'"
+      :initial-name="editingUtensil?.name"
+      :initial-image="editingUtensil?.image"
+      :initial-price="editingUtensil?.price"
+      :initial-stock="editingUtensil?.stock"
+      :select-fields="utensilFormSelectFields"
+      @submit="handleFormSubmit"
+      @cancel="closeForm"
+    />
+
+    <CategoryManagerModal
+      v-if="categoryManagerOpen"
+      :groups="categoryGroups"
+      @add="handleCategoryAdd"
+      @toggle="handleCategoryToggleHidden"
+      @close="categoryManagerOpen = false"
+    />
+
+    <ConfirmDialog
+      v-if="pendingDeleteUtensil"
+      title="刪除商品"
+      :message="`確定要刪除「${pendingDeleteUtensil.name}」嗎？此動作無法復原。`"
+      confirm-label="刪除"
+      @confirm="confirmDelete"
+      @cancel="cancelDelete"
+    />
   </div>
 </template>
 
 <style scoped>
+.coffee-utensil-page {
+  width: 100%;
+}
+
+.admin-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.admin-toolbar__toggle,
+.admin-toolbar__add,
+.admin-toolbar__category {
+  padding: 8px 16px;
+  border: 1px solid var(--color-brand);
+  border-radius: 6px;
+  background: var(--color-background);
+  color: var(--color-brand);
+  cursor: pointer;
+}
+
+.admin-toolbar__add {
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+}
+
 .coffee-utensil {
   display: flex;
   flex-wrap: wrap;
@@ -152,19 +395,84 @@ function handleAddToCart(payload: { id: string; quantity: number }) {
 
 .products {
   flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.products__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.products__search {
+  flex: 1 1 220px;
+  max-width: 320px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-background-soft);
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.products__sort {
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-background-soft);
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.products__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text);
+  opacity: 0.7;
+}
+
+.products__grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
 }
 
+.product-cell {
+  position: relative;
+  display: flex;
+}
+
+.product-cell__admin-actions {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+
+.product-cell__admin-actions button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-background);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
 @media (min-width: 700px) {
-  .products {
+  .products__grid {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
 @media (min-width: 1000px) {
-  .products {
+  .products__grid {
     grid-template-columns: repeat(4, 1fr);
   }
 }
@@ -179,7 +487,7 @@ function handleAddToCart(payload: { id: string; quantity: number }) {
     flex: none;
   }
 
-  .products {
+  .products__grid {
     grid-template-columns: 1fr;
   }
 }
