@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useCart } from '@/stores/cart'
+import { useAuth } from '@/stores/auth'
 import { useToast } from '@/stores/toast'
 import { simulateDelay } from '@/utils/async'
+import { api, ApiError } from '@/lib/api'
 import { RouteName } from '@/router/routeName'
 import IconCart from './icons/IconCart.vue'
 import IconImagePlaceholder from './icons/IconImagePlaceholder.vue'
 
-const { items, updateQuantity, removeItem, clearCart, totalPrice } = useCart()
+const router = useRouter()
+const { items, updateQuantity, removeItem, totalPrice } = useCart()
+const { isLoggedIn } = useAuth()
 const { showToast } = useToast()
 
 const COUPONS: Record<string, number> = {
@@ -56,13 +61,24 @@ function removeCoupon() {
 
 async function checkout() {
   if (isCheckingOut.value) return
+
+  if (!isLoggedIn.value) {
+    showToast('請先登入會員才能結帳', 'error')
+    router.push({ name: RouteName.MEMBER })
+    return
+  }
+
   isCheckingOut.value = true
-  await simulateDelay(800)
-  console.log('前往結帳', { items: [...items], total: total.value })
-  isCheckingOut.value = false
-  orderPlaced.value = true
-  clearCart()
-  showToast('訂單已送出（僅為示範，未串接實際金流）', 'success')
+  try {
+    await api.post('/orders/checkout', undefined, { auth: true, guest: true })
+    items.splice(0, items.length)
+    orderPlaced.value = true
+    showToast('訂單已送出（未串接實際金流，優惠券折扣僅為前端示範）', 'success')
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '結帳失敗，請稍後再試', 'error')
+  } finally {
+    isCheckingOut.value = false
+  }
 }
 </script>
 

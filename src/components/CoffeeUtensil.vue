@@ -9,10 +9,10 @@ import { useCart } from '@/stores/cart'
 import { useAuth } from '@/stores/auth'
 import { useUtensils, type CoffeeUtensilItem } from '@/stores/utensils'
 import { useToast } from '@/stores/toast'
-import { simulateDelay } from '@/utils/async'
+import { ApiError } from '@/lib/api'
 
 const { addItem } = useCart()
-const { canManage, testMode, verifyAdminPermission } = useAuth()
+const { isAdmin, verifyAdminPermission } = useAuth()
 const { showToast } = useToast()
 const route = useRoute()
 
@@ -107,20 +107,14 @@ const utensilFormSelectFields = computed(() => [
   },
 ])
 
-function handleFormSubmit(payload: {
+async function handleFormSubmit(payload: {
   name: string
   image: string
   price: number
   stock: number
   selections: Record<string, string>
 }) {
-  if (testMode.value) {
-    console.log('[測試模式] 略過實際新增／編輯商品動作')
-    showToast('測試模式：已略過實際新增／編輯動作', 'info')
-    closeForm()
-    return
-  }
-  if (!verifyAdminPermission()) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     closeForm()
     return
@@ -129,20 +123,23 @@ function handleFormSubmit(payload: {
   const category = payload.selections.category ?? visibleCategories.value[0] ?? ''
   const wasAdd = formMode.value === 'add'
 
-  if (wasAdd) {
-    addUtensil({ name: payload.name, image: payload.image, price: payload.price, stock: payload.stock, category })
-  } else if (formMode.value === 'edit' && editingUtensil.value) {
-    updateUtensil(editingUtensil.value.id, {
-      name: payload.name,
-      image: payload.image,
-      price: payload.price,
-      stock: payload.stock,
-      category,
-    })
+  try {
+    if (wasAdd) {
+      await addUtensil({ name: payload.name, image: payload.image, price: payload.price, stock: payload.stock, category })
+    } else if (formMode.value === 'edit' && editingUtensil.value) {
+      await updateUtensil(editingUtensil.value.id, {
+        name: payload.name,
+        image: payload.image,
+        price: payload.price,
+        stock: payload.stock,
+        category,
+      })
+    }
+    showToast(wasAdd ? `已新增商品：${payload.name}` : `已更新商品：${payload.name}`, 'success')
+    closeForm()
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '操作失敗，請稍後再試', 'error')
   }
-
-  showToast(wasAdd ? `已新增商品：${payload.name}` : `已更新商品：${payload.name}`, 'success')
-  closeForm()
 }
 
 const pendingDeleteUtensil = ref<CoffeeUtensilItem | null>(null)
@@ -160,19 +157,17 @@ async function confirmDelete() {
   pendingDeleteUtensil.value = null
   if (!utensil) return
 
-  if (testMode.value) {
-    console.log('[測試模式] 略過實際刪除商品動作')
-    showToast('測試模式：已略過實際刪除動作', 'info')
-    return
-  }
-  if (!verifyAdminPermission()) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     return
   }
 
-  await simulateDelay(400)
-  removeUtensil(utensil.id)
-  showToast(`已刪除商品：${utensil.name}`, 'success')
+  try {
+    await removeUtensil(utensil.id)
+    showToast(`已刪除商品：${utensil.name}`, 'success')
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '刪除失敗，請稍後再試', 'error')
+  }
 }
 
 // 類別管理
@@ -186,18 +181,22 @@ const categoryGroups = computed(() => [
   },
 ])
 
-function handleCategoryAdd(payload: { groupKey: string; value: string }) {
-  if (!testMode.value && !verifyAdminPermission()) {
+async function handleCategoryAdd(payload: { groupKey: string; value: string }) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     categoryManagerOpen.value = false
     return
   }
-  addCategory(payload.value)
-  showToast(`已新增類別：${payload.value}`, 'success')
+  try {
+    await addCategory(payload.value)
+    showToast(`已新增類別：${payload.value}`, 'success')
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '新增類別失敗', 'error')
+  }
 }
 
-function handleCategoryToggleHidden(payload: { groupKey: string; value: string }) {
-  if (!testMode.value && !verifyAdminPermission()) {
+async function handleCategoryToggleHidden(payload: { groupKey: string; value: string }) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     categoryManagerOpen.value = false
     return
@@ -209,7 +208,12 @@ function handleCategoryToggleHidden(payload: { groupKey: string; value: string }
     return
   }
 
-  toggleCategoryHidden(payload.value)
+  try {
+    await toggleCategoryHidden(payload.value)
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '操作失敗，請稍後再試', 'error')
+    return
+  }
 
   if (!isCurrentlyHidden && selectedCategory.value === payload.value) {
     selectedCategory.value = null
@@ -221,7 +225,7 @@ function handleCategoryToggleHidden(payload: { groupKey: string; value: string }
 
 <template>
   <div class="coffee-utensil-page">
-    <div v-if="canManage" class="admin-toolbar">
+    <div v-if="isAdmin" class="admin-toolbar">
       <button type="button" class="admin-toolbar__toggle" @click="editMode = !editMode">
         {{ editMode ? '結束編輯' : '編輯模式' }}
       </button>

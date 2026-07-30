@@ -2,15 +2,28 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { RouteName } from '@/router/routeName'
+import { useAuth } from '@/stores/auth'
 import AuthCard from './AuthCard.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { forgotPassword } = useAuth()
 
 const email = ref(typeof route.query.email === 'string' ? route.query.email : '')
+const error = ref('')
+const isSubmitting = ref(false)
 
-function handleSubmit() {
-  router.push({ name: RouteName.VERIFY_CODE, query: { email: email.value } })
+async function handleSubmit() {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
+  error.value = ''
+  const result = await forgotPassword(email.value)
+  isSubmitting.value = false
+  if (!result.ok) {
+    error.value = result.message ?? '請稍後再試'
+    return
+  }
+  router.push({ name: RouteName.VERIFY_CODE, query: { email: email.value, mode: 'reset', devCode: result.devCode } })
 }
 </script>
 
@@ -21,7 +34,10 @@ function handleSubmit() {
         帳號（信箱）
         <input v-model="email" type="email" required placeholder="you@example.com" />
       </label>
-      <button type="submit" class="submit-btn">取得驗證碼</button>
+      <button type="submit" class="submit-btn" :disabled="isSubmitting">
+        {{ isSubmitting ? '傳送中...' : '取得驗證碼' }}
+      </button>
+      <p v-if="error" class="feedback feedback--error">{{ error }}</p>
     </form>
     <RouterLink :to="{ name: RouteName.MEMBER }" class="back-link">返回登入</RouterLink>
   </AuthCard>
@@ -62,8 +78,20 @@ function handleSubmit() {
   transition: background-color 0.2s;
 }
 
-.submit-btn:hover {
+.submit-btn:hover:not(:disabled) {
   background: var(--color-brand-dark);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.feedback--error {
+  margin-top: 4px;
+  text-align: center;
+  color: #d33;
+  font-size: 0.85rem;
 }
 
 .back-link {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouteName } from '@/router/routeName'
+import { api, ApiError } from '@/lib/api'
+import { useAuth } from '@/stores/auth'
 import IconImagePlaceholder from './icons/IconImagePlaceholder.vue'
 
 interface OrderItem {
@@ -11,56 +13,36 @@ interface OrderItem {
 }
 
 interface Order {
-  id: string
-  date: string
+  id: number
+  orderNumber: string
+  createdAt: string
   items: OrderItem[]
   totalPrice: number
 }
 
-const orders: Order[] = [
-  {
-    id: 'OD20260715001',
-    date: '2026-07-15',
-    items: [
-      { name: '耶加雪菲', image: '', quantity: 2, price: 380 },
-      { name: 'V60 濾杯', image: '', quantity: 1, price: 450 },
-    ],
-    totalPrice: 1210,
-  },
-  {
-    id: 'OD20260602001',
-    date: '2026-06-02',
-    items: [{ name: '曼特寧', image: '', quantity: 1, price: 340 }],
-    totalPrice: 340,
-  },
-  {
-    id: 'OD20260418002',
-    date: '2026-04-18',
-    items: [
-      { name: '瑰夏厭氧', image: '', quantity: 1, price: 620 },
-      { name: '手搖磨豆機', image: '', quantity: 1, price: 1200 },
-      { name: '濾紙 100 入', image: '', quantity: 2, price: 150 },
-    ],
-    totalPrice: 2120,
-  },
-  {
-    id: 'OD20260305001',
-    date: '2026-03-05',
-    items: [{ name: '巴西聖多斯', image: '', quantity: 3, price: 300 }],
-    totalPrice: 900,
-  },
-  {
-    id: 'OD20260112003',
-    date: '2026-01-12',
-    items: [
-      { name: '電子秤', image: '', quantity: 1, price: 650 },
-      { name: '手沖壺', image: '', quantity: 1, price: 890 },
-    ],
-    totalPrice: 1540,
-  },
-]
+const { isLoggedIn } = useAuth()
 
-const sortedOrders = computed(() => [...orders].sort((a, b) => b.date.localeCompare(a.date)))
+const orders = ref<Order[]>([])
+const isLoading = ref(false)
+const error = ref('')
+
+async function fetchOrders() {
+  isLoading.value = true
+  error.value = ''
+  try {
+    orders.value = await api.get<Order[]>('/orders', { auth: true })
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : '載入訂單失敗，請稍後再試'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  if (isLoggedIn.value) fetchOrders()
+})
+
+const sortedOrders = computed(() => [...orders.value].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
 
 const expandedIds = ref<Set<string>>(new Set())
 
@@ -75,9 +57,9 @@ function toggleExpand(id: string) {
   expandedIds.value = next
 }
 
-function formatDate(dateStr: string) {
-  const [year, month, day] = dateStr.split('-').map(Number)
-  return `${year}年${month}月${day}日`
+function formatDate(isoStr: string) {
+  const date = new Date(isoStr)
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
 }
 </script>
 
@@ -85,19 +67,24 @@ function formatDate(dateStr: string) {
   <div class="order-history">
     <h1 class="order-history__title">訂單紀錄</h1>
 
-    <ul class="order-list">
-      <li v-for="order in sortedOrders" :key="order.id" class="order-card">
+    <p v-if="!isLoggedIn" class="order-history__empty">請先登入才能查看訂單紀錄</p>
+    <p v-else-if="isLoading" class="order-history__empty">載入中...</p>
+    <p v-else-if="error" class="order-history__empty">{{ error }}</p>
+    <p v-else-if="sortedOrders.length === 0" class="order-history__empty">尚無訂單紀錄</p>
+
+    <ul v-else class="order-list">
+      <li v-for="order in sortedOrders" :key="order.orderNumber" class="order-card">
         <div class="order-card__header">
-          <span class="order-card__id">訂單編號：{{ order.id }}</span>
-          <button type="button" class="order-card__toggle" @click="toggleExpand(order.id)">
-            {{ isExpanded(order.id) ? '收合' : '展開' }}
-            <span class="order-card__chevron" :class="{ 'order-card__chevron--open': isExpanded(order.id) }">▾</span>
+          <span class="order-card__id">訂單編號：{{ order.orderNumber }}</span>
+          <button type="button" class="order-card__toggle" @click="toggleExpand(order.orderNumber)">
+            {{ isExpanded(order.orderNumber) ? '收合' : '展開' }}
+            <span class="order-card__chevron" :class="{ 'order-card__chevron--open': isExpanded(order.orderNumber) }">▾</span>
           </button>
         </div>
 
         <ul class="order-card__items">
           <li
-            v-for="item in (isExpanded(order.id) ? order.items : order.items.slice(0, 1))"
+            v-for="item in (isExpanded(order.orderNumber) ? order.items : order.items.slice(0, 1))"
             :key="item.name"
             class="order-item"
           >
@@ -110,17 +97,17 @@ function formatDate(dateStr: string) {
             <span class="order-item__price">NT$ {{ item.price * item.quantity }}</span>
           </li>
         </ul>
-        <p v-if="!isExpanded(order.id) && order.items.length > 1" class="order-card__more">
+        <p v-if="!isExpanded(order.orderNumber) && order.items.length > 1" class="order-card__more">
           其餘 {{ order.items.length - 1 }} 項商品…
         </p>
 
         <div class="order-card__footer">
           <div class="order-card__summary">
-            <span class="order-card__date">{{ formatDate(order.date) }}</span>
+            <span class="order-card__date">{{ formatDate(order.createdAt) }}</span>
             <span class="order-card__total">總計 NT$ {{ order.totalPrice }}</span>
           </div>
           <RouterLink
-            :to="{ name: RouteName.CONTACT, query: { orderId: order.id } }"
+            :to="{ name: RouteName.CONTACT, query: { orderId: order.orderNumber } }"
             class="order-card__contact"
           >回報客服</RouterLink>
         </div>
@@ -138,6 +125,13 @@ function formatDate(dateStr: string) {
   margin-bottom: 20px;
   font-size: 1.4rem;
   color: var(--color-heading);
+}
+
+.order-history__empty {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--color-text);
+  opacity: 0.7;
 }
 
 .order-list {

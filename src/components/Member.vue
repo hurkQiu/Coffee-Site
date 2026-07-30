@@ -9,30 +9,56 @@ type Tab = 'login' | 'register'
 
 const router = useRouter()
 const route = useRoute()
-const { login } = useAuth()
+const { login, register } = useAuth()
 
 const activeTab = ref<Tab>(route.query.tab === 'register' ? 'register' : 'login')
 
 const loginEmail = ref('')
 const loginPassword = ref('')
 const loginMessage = ref('')
+const loginError = ref('')
+const isLoggingIn = ref(false)
 
 const registerEmail = ref('')
 const registerPassword = ref('')
+const registerError = ref('')
+const isRegistering = ref(false)
 
 function switchTab(tab: Tab) {
   activeTab.value = tab
   loginMessage.value = ''
+  loginError.value = ''
+  registerError.value = ''
 }
 
-function handleLogin() {
-  login(loginEmail.value)
+async function handleLogin() {
+  if (isLoggingIn.value) return
+  isLoggingIn.value = true
+  loginError.value = ''
+  const result = await login(loginEmail.value, loginPassword.value)
+  isLoggingIn.value = false
+  if (!result.ok) {
+    loginError.value = result.message ?? '登入失敗'
+    return
+  }
   loginMessage.value = `已登入：${loginEmail.value}`
   router.push({ name: RouteName.HOME })
 }
 
-function handleRegister() {
-  router.push({ name: RouteName.VERIFY_CODE, query: { email: registerEmail.value } })
+async function handleRegister() {
+  if (isRegistering.value) return
+  isRegistering.value = true
+  registerError.value = ''
+  const result = await register(registerEmail.value, registerPassword.value)
+  isRegistering.value = false
+  if (!result.ok) {
+    registerError.value = result.message ?? '註冊失敗'
+    return
+  }
+  router.push({
+    name: RouteName.VERIFY_CODE,
+    query: { email: registerEmail.value, mode: 'register', devCode: result.devCode },
+  })
 }
 </script>
 
@@ -66,9 +92,10 @@ function handleRegister() {
         :to="{ name: RouteName.FORGOT_PASSWORD, query: { email: loginEmail } }"
         class="forgot-link"
       >忘記密碼？</RouterLink>
-      <button type="submit" class="submit-btn">登入</button>
+      <button type="submit" class="submit-btn" :disabled="isLoggingIn">{{ isLoggingIn ? '登入中...' : '登入' }}</button>
       <p v-if="loginMessage" class="feedback">{{ loginMessage }}</p>
-      <p class="hint">測試提示：帳號中包含「admin」即可取得管理員權限</p>
+      <p v-if="loginError" class="feedback feedback--error">{{ loginError }}</p>
+      <p class="hint">測試帳號：admin@coffeehouse.example.com / admin123（管理員）</p>
     </form>
 
     <form v-else class="auth-form" @submit.prevent="handleRegister">
@@ -78,9 +105,10 @@ function handleRegister() {
       </label>
       <label class="auth-form__field">
         密碼
-        <input v-model="registerPassword" type="password" required placeholder="設定密碼" />
+        <input v-model="registerPassword" type="password" required minlength="6" placeholder="至少 6 碼" />
       </label>
-      <button type="submit" class="submit-btn">註冊</button>
+      <button type="submit" class="submit-btn" :disabled="isRegistering">{{ isRegistering ? '註冊中...' : '註冊' }}</button>
+      <p v-if="registerError" class="feedback feedback--error">{{ registerError }}</p>
     </form>
   </AuthCard>
 </template>
@@ -156,14 +184,23 @@ function handleRegister() {
   transition: background-color 0.2s;
 }
 
-.submit-btn:hover {
+.submit-btn:hover:not(:disabled) {
   background: var(--color-brand-dark);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .feedback {
   text-align: center;
   color: var(--color-brand);
   font-size: 0.9rem;
+}
+
+.feedback--error {
+  color: #d33;
 }
 
 .hint {

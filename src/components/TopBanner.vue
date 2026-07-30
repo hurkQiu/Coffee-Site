@@ -10,7 +10,7 @@ import IconOrderHistory from './icons/IconOrderHistory.vue';
 import IconHeart from './icons/IconHeart.vue';
 import coffeeLogo from '@/assets/images/coffee_logo.png';
 
-const { isLoggedIn, logout, testMode, toggleTestMode } = useAuth()
+const { isLoggedIn, logout } = useAuth()
 const { totalCount } = useCart()
 const { wishlistIds } = useWishlist()
 
@@ -108,14 +108,6 @@ function handleLogout() {
         >
             <IconOrderHistory />
         </RouterLink>
-
-        <button
-            type="button"
-            class="test-mode-button"
-            :class="{ 'test-mode-button--active': testMode }"
-            :aria-pressed="testMode"
-            @click="toggleTestMode"
-        >測試模式</button>
 
         <div
             class="nav-item member-item"
@@ -286,30 +278,6 @@ nav {
 .dropdown-fade-leave-to {
     opacity: 0;
     transform: translateY(-4px);
-}
-
-.test-mode-button {
-    flex: 0 0 auto;
-    padding: 6px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    border-radius: 999px;
-    background: none;
-    color: var(--color-on-brand);
-    font-size: 0.85rem;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
-}
-
-.test-mode-button:hover {
-    background-color: rgba(255, 255, 255, 0.15);
-}
-
-.test-mode-button--active {
-    background: #f5a623;
-    border-color: #f5a623;
-    color: #3a2a00;
-    font-weight: bold;
 }
 
 .order-history-button,

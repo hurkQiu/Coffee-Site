@@ -1,5 +1,5 @@
-import { computed } from 'vue'
-import { persistedRef, persistedSetRef } from '@/utils/persist'
+import { computed, ref } from 'vue'
+import { api } from '@/lib/api'
 
 export interface CoffeeBean {
   id: number
@@ -11,74 +11,83 @@ export interface CoffeeBean {
   process: string
 }
 
-const DEFAULT_ROAST_LEVELS = ['淺焙', '中焙', '深焙']
-const DEFAULT_PROCESS_METHODS = ['水洗', '日曬', '蜜處理', '厭氧']
+interface NamedOption {
+  name: string
+  hidden: boolean
+}
 
-const DEFAULT_BEANS: CoffeeBean[] = [
-  { id: 1, name: '耶加雪菲', price: 380, image: '', stock: 12, roast: '淺焙', process: '水洗' },
-  { id: 2, name: '西達摩', price: 360, image: '', stock: 8, roast: '淺焙', process: '日曬' },
-  { id: 3, name: '藝伎莊園', price: 520, image: '', stock: 3, roast: '淺焙', process: '蜜處理' },
-  { id: 4, name: '瑰夏厭氧', price: 620, image: '', stock: 0, roast: '淺焙', process: '厭氧' },
-  { id: 5, name: '曼特寧', price: 340, image: '', stock: 20, roast: '中焙', process: '水洗' },
-  { id: 6, name: '哥倫比亞', price: 350, image: '', stock: 15, roast: '中焙', process: '蜜處理' },
-  { id: 7, name: '巴西聖多斯', price: 300, image: '', stock: 25, roast: '深焙', process: '日曬' },
-  { id: 8, name: '摩卡爪哇', price: 390, image: '', stock: 6, roast: '深焙', process: '厭氧' },
-]
+const beans = ref<CoffeeBean[]>([])
+const roastOptions = ref<NamedOption[]>([])
+const processOptions = ref<NamedOption[]>([])
 
-const beans = persistedRef<CoffeeBean[]>('coffee-site:beans', DEFAULT_BEANS)
-const roastLevels = persistedRef<string[]>('coffee-site:roast-levels', DEFAULT_ROAST_LEVELS)
-const processMethods = persistedRef<string[]>('coffee-site:process-methods', DEFAULT_PROCESS_METHODS)
-const hiddenRoasts = persistedSetRef('coffee-site:hidden-roasts')
-const hiddenProcesses = persistedSetRef('coffee-site:hidden-processes')
+const roastLevels = computed(() => roastOptions.value.map((o) => o.name))
+const processMethods = computed(() => processOptions.value.map((o) => o.name))
+const hiddenRoasts = computed(() => new Set(roastOptions.value.filter((o) => o.hidden).map((o) => o.name)))
+const hiddenProcesses = computed(() => new Set(processOptions.value.filter((o) => o.hidden).map((o) => o.name)))
 
-const visibleRoastLevels = computed(() => roastLevels.value.filter((r) => !hiddenRoasts.value.has(r)))
-const visibleProcessMethods = computed(() => processMethods.value.filter((p) => !hiddenProcesses.value.has(p)))
+const visibleRoastLevels = computed(() => roastOptions.value.filter((o) => !o.hidden).map((o) => o.name))
+const visibleProcessMethods = computed(() => processOptions.value.filter((o) => !o.hidden).map((o) => o.name))
+
+let loaded = false
+
+async function load(force = false) {
+  if (loaded && !force) return
+  const [beanList, roasts, processes] = await Promise.all([
+    api.get<CoffeeBean[]>('/beans'),
+    api.get<NamedOption[]>('/beans/roast-levels'),
+    api.get<NamedOption[]>('/beans/process-methods'),
+  ])
+  beans.value = beanList
+  roastOptions.value = roasts
+  processOptions.value = processes
+  loaded = true
+}
 
 function getBeanById(id: number): CoffeeBean | null {
   return beans.value.find((b) => b.id === id) ?? null
 }
 
-function nextBeanId() {
-  return Math.max(0, ...beans.value.map((b) => b.id)) + 1
-}
-
-function addBean(payload: Omit<CoffeeBean, 'id'>) {
-  const bean: CoffeeBean = { id: nextBeanId(), ...payload }
+async function addBean(payload: Omit<CoffeeBean, 'id'>) {
+  const bean = await api.post<CoffeeBean>('/beans', payload, { auth: true })
   beans.value.push(bean)
   return bean
 }
 
-function updateBean(id: number, payload: Omit<CoffeeBean, 'id'>) {
-  const target = beans.value.find((b) => b.id === id)
-  if (!target) return
-  Object.assign(target, payload)
+async function updateBean(id: number, payload: Omit<CoffeeBean, 'id'>) {
+  const bean = await api.put<CoffeeBean>(`/beans/${id}`, payload, { auth: true })
+  const index = beans.value.findIndex((b) => b.id === id)
+  if (index !== -1) beans.value[index] = bean
+  return bean
 }
 
-function removeBean(id: number) {
+async function removeBean(id: number) {
+  await api.delete(`/beans/${id}`, { auth: true })
   const index = beans.value.findIndex((b) => b.id === id)
   if (index !== -1) beans.value.splice(index, 1)
 }
 
-function addRoastLevel(value: string) {
-  if (!roastLevels.value.includes(value)) roastLevels.value.push(value)
+async function addRoastLevel(value: string) {
+  roastOptions.value = await api.post<NamedOption[]>('/beans/roast-levels', { name: value }, { auth: true })
 }
 
-function addProcessMethod(value: string) {
-  if (!processMethods.value.includes(value)) processMethods.value.push(value)
+async function addProcessMethod(value: string) {
+  processOptions.value = await api.post<NamedOption[]>('/beans/process-methods', { name: value }, { auth: true })
 }
 
-function toggleRoastHidden(value: string) {
-  const next = new Set(hiddenRoasts.value)
-  if (next.has(value)) next.delete(value)
-  else next.add(value)
-  hiddenRoasts.value = next
+async function toggleRoastHidden(value: string) {
+  roastOptions.value = await api.patch<NamedOption[]>(
+    `/beans/roast-levels/${encodeURIComponent(value)}/toggle-hidden`,
+    undefined,
+    { auth: true },
+  )
 }
 
-function toggleProcessHidden(value: string) {
-  const next = new Set(hiddenProcesses.value)
-  if (next.has(value)) next.delete(value)
-  else next.add(value)
-  hiddenProcesses.value = next
+async function toggleProcessHidden(value: string) {
+  processOptions.value = await api.patch<NamedOption[]>(
+    `/beans/process-methods/${encodeURIComponent(value)}/toggle-hidden`,
+    undefined,
+    { auth: true },
+  )
 }
 
 export function useBeans() {
@@ -90,6 +99,7 @@ export function useBeans() {
     hiddenProcesses,
     visibleRoastLevels,
     visibleProcessMethods,
+    load,
     getBeanById,
     addBean,
     updateBean,

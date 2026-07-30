@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { api, ApiError } from '@/lib/api'
+import { useAuth } from '@/stores/auth'
 
 const route = useRoute()
+const { isLoggedIn } = useAuth()
 
 const orderId = ref(typeof route.query.orderId === 'string' ? route.query.orderId : '')
 const title = ref('')
 const content = ref('')
 const submitted = ref(false)
+const error = ref('')
+const isSubmitting = ref(false)
 
 watch(
   () => route.query.orderId,
@@ -16,9 +21,24 @@ watch(
   },
 )
 
-function handleSubmit() {
-  console.log('客服表單送出', { orderId: orderId.value, title: title.value, content: content.value })
-  submitted.value = true
+async function handleSubmit() {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
+  error.value = ''
+  try {
+    await api.post(
+      '/contact',
+      { orderId: orderId.value, title: title.value, content: content.value },
+      { auth: isLoggedIn.value },
+    )
+    submitted.value = true
+    title.value = ''
+    content.value = ''
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : '送出失敗，請稍後再試'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>
 
@@ -54,8 +74,11 @@ function handleSubmit() {
           內容
           <textarea v-model="content" required rows="5" placeholder="請詳細描述您遇到的狀況"></textarea>
         </label>
-        <button type="submit" class="contact-form__submit">送出</button>
+        <button type="submit" class="contact-form__submit" :disabled="isSubmitting">
+          {{ isSubmitting ? '送出中...' : '送出' }}
+        </button>
         <p v-if="submitted" class="contact-form__feedback">已送出，客服將盡快與您聯繫！</p>
+        <p v-if="error" class="contact-form__error">{{ error }}</p>
       </form>
     </section>
   </div>
@@ -138,13 +161,23 @@ function handleSubmit() {
   transition: background-color 0.2s;
 }
 
-.contact-form__submit:hover {
+.contact-form__submit:hover:not(:disabled) {
   background: var(--color-brand-dark);
+}
+
+.contact-form__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .contact-form__feedback {
   text-align: center;
   color: hsla(160, 100%, 30%, 1);
   font-weight: bold;
+}
+
+.contact-form__error {
+  text-align: center;
+  color: #d33;
 }
 </style>

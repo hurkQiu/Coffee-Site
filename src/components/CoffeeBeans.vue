@@ -9,10 +9,10 @@ import { useCart } from '@/stores/cart'
 import { useAuth } from '@/stores/auth'
 import { useBeans, type CoffeeBean } from '@/stores/beans'
 import { useToast } from '@/stores/toast'
-import { simulateDelay } from '@/utils/async'
+import { ApiError } from '@/lib/api'
 
 const { addItem } = useCart()
-const { canManage, testMode, verifyAdminPermission } = useAuth()
+const { isAdmin, verifyAdminPermission } = useAuth()
 const { showToast } = useToast()
 const route = useRoute()
 
@@ -124,20 +124,14 @@ const beanFormSelectFields = computed(() => [
   },
 ])
 
-function handleFormSubmit(payload: {
+async function handleFormSubmit(payload: {
   name: string
   image: string
   price: number
   stock: number
   selections: Record<string, string>
 }) {
-  if (testMode.value) {
-    console.log('[測試模式] 略過實際新增／編輯商品動作')
-    showToast('測試模式：已略過實際新增／編輯動作', 'info')
-    closeForm()
-    return
-  }
-  if (!verifyAdminPermission()) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     closeForm()
     return
@@ -147,21 +141,24 @@ function handleFormSubmit(payload: {
   const process = payload.selections.process ?? visibleProcessMethods.value[0] ?? ''
   const wasAdd = formMode.value === 'add'
 
-  if (wasAdd) {
-    addBean({ name: payload.name, image: payload.image, price: payload.price, stock: payload.stock, roast, process })
-  } else if (formMode.value === 'edit' && editingBean.value) {
-    updateBean(editingBean.value.id, {
-      name: payload.name,
-      image: payload.image,
-      price: payload.price,
-      stock: payload.stock,
-      roast,
-      process,
-    })
+  try {
+    if (wasAdd) {
+      await addBean({ name: payload.name, image: payload.image, price: payload.price, stock: payload.stock, roast, process })
+    } else if (formMode.value === 'edit' && editingBean.value) {
+      await updateBean(editingBean.value.id, {
+        name: payload.name,
+        image: payload.image,
+        price: payload.price,
+        stock: payload.stock,
+        roast,
+        process,
+      })
+    }
+    showToast(wasAdd ? `已新增商品：${payload.name}` : `已更新商品：${payload.name}`, 'success')
+    closeForm()
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '操作失敗，請稍後再試', 'error')
   }
-
-  showToast(wasAdd ? `已新增商品：${payload.name}` : `已更新商品：${payload.name}`, 'success')
-  closeForm()
 }
 
 const pendingDeleteBean = ref<CoffeeBean | null>(null)
@@ -179,19 +176,17 @@ async function confirmDelete() {
   pendingDeleteBean.value = null
   if (!bean) return
 
-  if (testMode.value) {
-    console.log('[測試模式] 略過實際刪除商品動作')
-    showToast('測試模式：已略過實際刪除動作', 'info')
-    return
-  }
-  if (!verifyAdminPermission()) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     return
   }
 
-  await simulateDelay(400)
-  removeBean(bean.id)
-  showToast(`已刪除商品：${bean.name}`, 'success')
+  try {
+    await removeBean(bean.id)
+    showToast(`已刪除商品：${bean.name}`, 'success')
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '刪除失敗，請稍後再試', 'error')
+  }
 }
 
 // 類別管理（烘焙度／處理法）
@@ -210,19 +205,23 @@ const categoryGroups = computed(() => [
   },
 ])
 
-function handleCategoryAdd(payload: { groupKey: string; value: string }) {
-  if (!testMode.value && !verifyAdminPermission()) {
+async function handleCategoryAdd(payload: { groupKey: string; value: string }) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     categoryManagerOpen.value = false
     return
   }
-  if (payload.groupKey === 'roast') addRoastLevel(payload.value)
-  else addProcessMethod(payload.value)
-  showToast(`已新增類別：${payload.value}`, 'success')
+  try {
+    if (payload.groupKey === 'roast') await addRoastLevel(payload.value)
+    else await addProcessMethod(payload.value)
+    showToast(`已新增類別：${payload.value}`, 'success')
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '新增類別失敗', 'error')
+  }
 }
 
-function handleCategoryToggleHidden(payload: { groupKey: string; value: string }) {
-  if (!testMode.value && !verifyAdminPermission()) {
+async function handleCategoryToggleHidden(payload: { groupKey: string; value: string }) {
+  if (!(await verifyAdminPermission())) {
     editMode.value = false
     categoryManagerOpen.value = false
     return
@@ -238,8 +237,13 @@ function handleCategoryToggleHidden(payload: { groupKey: string; value: string }
     return
   }
 
-  if (isRoast) toggleRoastHidden(payload.value)
-  else toggleProcessHidden(payload.value)
+  try {
+    if (isRoast) await toggleRoastHidden(payload.value)
+    else await toggleProcessHidden(payload.value)
+  } catch (err) {
+    showToast(err instanceof ApiError ? err.message : '操作失敗，請稍後再試', 'error')
+    return
+  }
 
   if (!isCurrentlyHidden) {
     if (isRoast && selectedRoast.value === payload.value) selectedRoast.value = null
@@ -252,7 +256,7 @@ function handleCategoryToggleHidden(payload: { groupKey: string; value: string }
 
 <template>
   <div class="coffee-beans-page">
-    <div v-if="canManage" class="admin-toolbar">
+    <div v-if="isAdmin" class="admin-toolbar">
       <button type="button" class="admin-toolbar__toggle" @click="editMode = !editMode">
         {{ editMode ? '結束編輯' : '編輯模式' }}
       </button>

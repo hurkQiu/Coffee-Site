@@ -1,5 +1,5 @@
-import { computed } from 'vue'
-import { persistedRef, persistedSetRef } from '@/utils/persist'
+import { computed, ref } from 'vue'
+import { api } from '@/lib/api'
 
 export interface CoffeeUtensilItem {
   id: number
@@ -10,59 +10,64 @@ export interface CoffeeUtensilItem {
   category: string
 }
 
-const DEFAULT_CATEGORIES = ['濾杯', '磨豆機', '耗材', '其餘用具']
+interface NamedOption {
+  name: string
+  hidden: boolean
+}
 
-const DEFAULT_UTENSILS: CoffeeUtensilItem[] = [
-  { id: 1, name: 'V60 濾杯', price: 450, image: '', stock: 14, category: '濾杯' },
-  { id: 2, name: '蛋糕型濾杯', price: 380, image: '', stock: 9, category: '濾杯' },
-  { id: 3, name: '手搖磨豆機', price: 1200, image: '', stock: 5, category: '磨豆機' },
-  { id: 4, name: '電動磨豆機', price: 3200, image: '', stock: 0, category: '磨豆機' },
-  { id: 5, name: '濾紙 100 入', price: 150, image: '', stock: 40, category: '耗材' },
-  { id: 6, name: '濾布', price: 220, image: '', stock: 18, category: '耗材' },
-  { id: 7, name: '手沖壺', price: 890, image: '', stock: 7, category: '其餘用具' },
-  { id: 8, name: '電子秤', price: 650, image: '', stock: 3, category: '其餘用具' },
-]
+const utensils = ref<CoffeeUtensilItem[]>([])
+const categoryOptions = ref<NamedOption[]>([])
 
-const utensils = persistedRef<CoffeeUtensilItem[]>('coffee-site:utensils', DEFAULT_UTENSILS)
-const categories = persistedRef<string[]>('coffee-site:utensil-categories', DEFAULT_CATEGORIES)
-const hiddenCategories = persistedSetRef('coffee-site:hidden-utensil-categories')
+const categories = computed(() => categoryOptions.value.map((o) => o.name))
+const hiddenCategories = computed(() => new Set(categoryOptions.value.filter((o) => o.hidden).map((o) => o.name)))
+const visibleCategories = computed(() => categoryOptions.value.filter((o) => !o.hidden).map((o) => o.name))
 
-const visibleCategories = computed(() => categories.value.filter((c) => !hiddenCategories.value.has(c)))
+let loaded = false
+
+async function load(force = false) {
+  if (loaded && !force) return
+  const [utensilList, cats] = await Promise.all([
+    api.get<CoffeeUtensilItem[]>('/utensils'),
+    api.get<NamedOption[]>('/utensils/categories'),
+  ])
+  utensils.value = utensilList
+  categoryOptions.value = cats
+  loaded = true
+}
 
 function getUtensilById(id: number): CoffeeUtensilItem | null {
   return utensils.value.find((u) => u.id === id) ?? null
 }
 
-function nextUtensilId() {
-  return Math.max(0, ...utensils.value.map((u) => u.id)) + 1
-}
-
-function addUtensil(payload: Omit<CoffeeUtensilItem, 'id'>) {
-  const utensil: CoffeeUtensilItem = { id: nextUtensilId(), ...payload }
+async function addUtensil(payload: Omit<CoffeeUtensilItem, 'id'>) {
+  const utensil = await api.post<CoffeeUtensilItem>('/utensils', payload, { auth: true })
   utensils.value.push(utensil)
   return utensil
 }
 
-function updateUtensil(id: number, payload: Omit<CoffeeUtensilItem, 'id'>) {
-  const target = utensils.value.find((u) => u.id === id)
-  if (!target) return
-  Object.assign(target, payload)
+async function updateUtensil(id: number, payload: Omit<CoffeeUtensilItem, 'id'>) {
+  const utensil = await api.put<CoffeeUtensilItem>(`/utensils/${id}`, payload, { auth: true })
+  const index = utensils.value.findIndex((u) => u.id === id)
+  if (index !== -1) utensils.value[index] = utensil
+  return utensil
 }
 
-function removeUtensil(id: number) {
+async function removeUtensil(id: number) {
+  await api.delete(`/utensils/${id}`, { auth: true })
   const index = utensils.value.findIndex((u) => u.id === id)
   if (index !== -1) utensils.value.splice(index, 1)
 }
 
-function addCategory(value: string) {
-  if (!categories.value.includes(value)) categories.value.push(value)
+async function addCategory(value: string) {
+  categoryOptions.value = await api.post<NamedOption[]>('/utensils/categories', { name: value }, { auth: true })
 }
 
-function toggleCategoryHidden(value: string) {
-  const next = new Set(hiddenCategories.value)
-  if (next.has(value)) next.delete(value)
-  else next.add(value)
-  hiddenCategories.value = next
+async function toggleCategoryHidden(value: string) {
+  categoryOptions.value = await api.patch<NamedOption[]>(
+    `/utensils/categories/${encodeURIComponent(value)}/toggle-hidden`,
+    undefined,
+    { auth: true },
+  )
 }
 
 export function useUtensils() {
@@ -71,6 +76,7 @@ export function useUtensils() {
     categories,
     hiddenCategories,
     visibleCategories,
+    load,
     getUtensilById,
     addUtensil,
     updateUtensil,
